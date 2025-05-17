@@ -1,13 +1,13 @@
 import requests
 import streamlit as st
 
-# 🔐 Validate API key early
+# 🔐 Check API key
 API_KEY = st.secrets.get("STEAM_API_KEY", "").strip()
 if not API_KEY or API_KEY == "YOUR_STEAM_API_KEY_HERE":
     st.error("❌ Steam API key is missing or invalid. Check your app secrets.")
     st.stop()
 
-# 🔄 Steam API calls
+# 🌐 Steam API calls
 def resolve_input_to_steamid(input_str):
     if input_str.isdigit() and len(input_str) >= 16:
         return input_str
@@ -23,16 +23,20 @@ def resolve_input_to_steamid(input_str):
     except Exception:
         return None
 
-def get_display_name(steamid):
+def get_user_profile(steamid):
     url = "http://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/"
     params = {'key': API_KEY, 'steamids': steamid}
     try:
         r = requests.get(url, params=params, timeout=5)
         r.raise_for_status()
-        players = r.json().get('response', {}).get('players', [])
-        return players[0]['personaname'] if players else steamid
+        data = r.json().get('response', {}).get('players', [{}])[0]
+        return {
+            'name': data.get('personaname', steamid),
+            'avatar': data.get('avatarfull', ''),
+            'steamid': steamid
+        }
     except Exception:
-        return steamid
+        return {'name': steamid, 'avatar': '', 'steamid': steamid}
 
 def get_owned_games(steamid):
     url = "http://api.steampowered.com/IPlayerService/GetOwnedGames/v0001/"
@@ -61,29 +65,27 @@ def get_owned_games(steamid):
 st.title("🎮 Steam Common Games Finder")
 st.write("Enter up to 10 Steam profile names (vanity URLs or SteamID64). Only non-empty fields are checked.")
 
-# 📥 User input fields
 user_inputs = [st.text_input(f"User {i+1}", key=f"user_{i}") for i in range(10)]
 valid_inputs = [u.strip() for u in user_inputs if u.strip()]
 
-# ✅ Execution
 if len(valid_inputs) >= 2:
     if st.button("Find Common Games"):
-        steam_ids, display_names, user_games = [], [], []
+        profiles, user_games = [], []
+
         for u in valid_inputs:
             sid = resolve_input_to_steamid(u)
             if not sid:
                 st.error(f"❌ Could not resolve user: {u}")
                 st.stop()
-            name = get_display_name(sid)
+            profile = get_user_profile(sid)
             games = get_owned_games(sid)
             if not games:
-                st.error(f"❌ No games found or profile private: {name}")
+                st.error(f"❌ No games found or profile private: {profile['name']}")
                 st.stop()
-            steam_ids.append(sid)
-            display_names.append(name)
+            profiles.append(profile)
             user_games.append(games)
 
-        # 🔎 Find common games
+        # 🔍 Find common games
         common_ids = set(user_games[0].keys())
         for g in user_games[1:]:
             common_ids &= set(g.keys())
@@ -94,7 +96,7 @@ if len(valid_inputs) >= 2:
             results = []
             for appid in common_ids:
                 name = user_games[0][appid]['name']
-                hours = [user_games[i][appid]['hours'] for i in range(len(valid_inputs))]
+                hours = [user_games[i][appid]['hours'] for i in range(len(profiles))]
                 total = sum(hours)
                 results.append((appid, name, hours, total))
 
@@ -104,7 +106,12 @@ if len(valid_inputs) >= 2:
                 st.image(f"https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/capsule_616x353.jpg", width=308)
                 st.markdown(f"### {name}")
                 for i, h in enumerate(hours_list):
-                    st.markdown(f"- **{display_names[i]}**: {h} hours")
+                    avatar = profiles[i]["avatar"]
+                    display = profiles[i]["name"]
+                    cols = st.columns([1, 5])
+                    if avatar:
+                        cols[0].image(avatar, width=50)
+                    cols[1].markdown(f"**{display}**: {h} hours")
                 st.markdown("---")
 else:
     st.info("Please enter at least 2 users.")
