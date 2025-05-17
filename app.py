@@ -3,6 +3,7 @@ import streamlit as st
 
 # Validate Steam API key immediately
 API_KEY = st.secrets.get("STEAM_API_KEY", "").strip()
+st.text(f"API_KEY loaded (len={len(API_KEY)}): starts with {API_KEY[:5]}")
 if not API_KEY or API_KEY == "YOUR_STEAM_API_KEY_HERE":
     st.error("❌ Steam API key is missing or invalid. Check your app secrets.")
     st.stop()
