@@ -1,5 +1,6 @@
 import requests
 import streamlit as st
+import re
 
 API_KEY = st.secrets.get("STEAM_API_KEY", "").strip()
 if not API_KEY:
@@ -7,8 +8,19 @@ if not API_KEY:
     st.stop()
 
 def resolve_input_to_steamid(input_str):
+    input_str = input_str.strip()
+
+    m_id = re.match(r".*steamcommunity\.com/id/([^/]+)/?", input_str)
+    m_num = re.match(r".*steamcommunity\.com/profiles/(\d{17})/?", input_str)
+
+    if m_id:
+        return resolve_input_to_steamid(m_id.group(1))
+    if m_num:
+        return m_num.group(1)
+
     if input_str.isdigit() and len(input_str) >= 16:
         return input_str
+
     url = "http://api.steampowered.com/ISteamUser/ResolveVanityURL/v0001/"
     params = {'key': API_KEY, 'vanityurl': input_str}
     try:
@@ -62,17 +74,15 @@ def get_owned_games(steamid):
     except Exception:
         return {}
 
-# UI
 st.title("🎮 Steam Common Games Finder")
-st.write("Enter up to 10 Steam profile names (vanity URLs or SteamID64). Only non-empty fields are used.")
+st.write("Enter up to 10 Steam profile names (vanity, SteamID64, or full URLs). Only non-empty fields are used.")
 
 user_inputs = [st.text_input(f"User {i+1}", key=f"user_{i}") for i in range(10)]
 valid_inputs = [u.strip() for u in user_inputs if u.strip()]
 
 if len(valid_inputs) >= 2:
     if st.button("Find Common Games"):
-        profiles = []
-        user_games = []
+        profiles, user_games = [], []
 
         for u in valid_inputs:
             sid = resolve_input_to_steamid(u)
@@ -87,7 +97,6 @@ if len(valid_inputs) >= 2:
             profiles.append(profile)
             user_games.append(games)
 
-        # Match common appIDs
         common_ids = set(user_games[0].keys())
         for g in user_games[1:]:
             common_ids &= set(g.keys())
@@ -109,8 +118,9 @@ if len(valid_inputs) >= 2:
                 hours_data.sort(key=lambda x: x['hours'], reverse=True)
                 results.append((appid, name, hours_data))
 
-            # Sort games by total hours descending
             results.sort(key=lambda x: sum(u['hours'] for u in x[2]), reverse=True)
+
+            st.success(f"🎯 Found {len(results)} common game(s).")
 
             for appid, name, user_data in results:
                 st.image(f"https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/capsule_616x353.jpg", width=308)
