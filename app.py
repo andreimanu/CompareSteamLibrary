@@ -8,15 +8,23 @@ def resolve_input_to_steamid(input_str):
         return input_str
     url = "http://api.steampowered.com/ISteamUser/ResolveVanityURL/v0001/"
     params = {'key': API_KEY, 'vanityurl': input_str}
-    r = requests.get(url, params=params).json()
-    return r['response'].get('steamid')
+    try:
+        r = requests.get(url, params=params, timeout=5)
+        r.raise_for_status()
+        return r.json().get('response', {}).get('steamid')
+    except Exception:
+        return None
 
 def get_display_name(steamid):
     url = "http://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/"
     params = {'key': API_KEY, 'steamids': steamid}
-    r = requests.get(url, params=params).json()
-    players = r.get('response', {}).get('players', [])
-    return players[0]['personaname'] if players else steamid
+    try:
+        r = requests.get(url, params=params, timeout=5)
+        r.raise_for_status()
+        players = r.json().get('response', {}).get('players', [])
+        return players[0]['personaname'] if players else steamid
+    except Exception:
+        return steamid
 
 def get_owned_games(steamid):
     url = "http://api.steampowered.com/IPlayerService/GetOwnedGames/v0001/"
@@ -26,28 +34,37 @@ def get_owned_games(steamid):
         'include_appinfo': True,
         'format': 'json'
     }
-    r = requests.get(url, params=params)
-    data = r.json().get('response', {})
-    if 'games' not in data:
+    try:
+        r = requests.get(url, params=params, timeout=10)
+        r.raise_for_status()
+        data = r.json().get('response', {})
+        if 'games' not in data:
+            return {}
+        return {str(g['appid']): {
+            'name': g['name'],
+            'hours': round(g['playtime_forever'] / 60, 1)
+        } for g in data['games']}
+    except Exception:
         return {}
-    return {str(g['appid']): {
-        'name': g['name'],
-        'hours': round(g['playtime_forever'] / 60, 1)
-    } for g in data['games']}
 
 st.title("🎮 Steam Common Games Finder")
-st.write("Enter up to 5 Steam profile names (vanity URLs or SteamID64). Only public libraries are supported.")
+st.write("Start with 3 Steam users (vanity URL or SteamID64). More fields appear as needed.")
 
 user_inputs = []
-for i in range(5):
-    u = st.text_input(f"User {i+1}", key=f"user{i}")
-    if u:
-        user_inputs.append(u)
+fields = ["User 1", "User 2", "User 3", "User 4", "User 5"]
 
-if len(user_inputs) >= 2:
+for i, label in enumerate(fields):
+    if i > 2 and not user_inputs[-1]:  # if previous was empty, stop rendering new inputs
+        break
+    u = st.text_input(label, key=f"user{i}")
+    user_inputs.append(u)
+
+valid_inputs = [u for u in user_inputs if u]
+
+if len(valid_inputs) >= 2:
     if st.button("Find Common Games"):
         steam_ids, display_names, user_games = [], [], []
-        for u in user_inputs:
+        for u in valid_inputs:
             sid = resolve_input_to_steamid(u)
             if not sid:
                 st.error(f"Could not resolve user: {u}")
@@ -71,7 +88,7 @@ if len(user_inputs) >= 2:
             results = []
             for appid in common_ids:
                 name = user_games[0][appid]['name']
-                hours = [user_games[i][appid]['hours'] for i in range(len(user_inputs))]
+                hours = [user_games[i][appid]['hours'] for i in range(len(valid_inputs))]
                 total = sum(hours)
                 results.append((appid, name, hours, total))
 
