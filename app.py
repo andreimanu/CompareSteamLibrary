@@ -1,13 +1,11 @@
 import requests
 import streamlit as st
 
-# 🔐 Check API key
 API_KEY = st.secrets.get("STEAM_API_KEY", "").strip()
-if not API_KEY or API_KEY == "YOUR_STEAM_API_KEY_HERE":
+if not API_KEY:
     st.error("❌ Steam API key is missing or invalid. Check your app secrets.")
     st.stop()
 
-# 🌐 Steam API calls
 def resolve_input_to_steamid(input_str):
     if input_str.isdigit() and len(input_str) >= 16:
         return input_str
@@ -29,10 +27,13 @@ def get_user_profile(steamid):
     try:
         r = requests.get(url, params=params, timeout=5)
         r.raise_for_status()
-        data = r.json().get('response', {}).get('players', [{}])[0]
+        players = r.json().get('response', {}).get('players', [])
+        if not players:
+            return {'name': steamid, 'avatar': '', 'steamid': steamid}
+        player = players[0]
         return {
-            'name': data.get('personaname', steamid),
-            'avatar': data.get('avatarfull', ''),
+            'name': player.get('personaname') or steamid,
+            'avatar': player.get('avatarfull', ''),
             'steamid': steamid
         }
     except Exception:
@@ -61,16 +62,17 @@ def get_owned_games(steamid):
     except Exception:
         return {}
 
-# 🖥️ Interface
+# UI
 st.title("🎮 Steam Common Games Finder")
-st.write("Enter up to 10 Steam profile names (vanity URLs or SteamID64). Only non-empty fields are checked.")
+st.write("Enter up to 10 Steam profile names (vanity URLs or SteamID64). Only non-empty fields are used.")
 
 user_inputs = [st.text_input(f"User {i+1}", key=f"user_{i}") for i in range(10)]
 valid_inputs = [u.strip() for u in user_inputs if u.strip()]
 
 if len(valid_inputs) >= 2:
     if st.button("Find Common Games"):
-        profiles, user_games = [], []
+        profiles = []
+        user_games = []
 
         for u in valid_inputs:
             sid = resolve_input_to_steamid(u)
@@ -85,7 +87,7 @@ if len(valid_inputs) >= 2:
             profiles.append(profile)
             user_games.append(games)
 
-        # 🔍 Find common games
+        # Match common appIDs
         common_ids = set(user_games[0].keys())
         for g in user_games[1:]:
             common_ids &= set(g.keys())
@@ -96,22 +98,28 @@ if len(valid_inputs) >= 2:
             results = []
             for appid in common_ids:
                 name = user_games[0][appid]['name']
-                hours = [user_games[i][appid]['hours'] for i in range(len(profiles))]
-                total = sum(hours)
-                results.append((appid, name, hours, total))
+                hours_data = []
+                for i in range(len(profiles)):
+                    h = user_games[i][appid]['hours']
+                    hours_data.append({
+                        'name': profiles[i]['name'],
+                        'avatar': profiles[i]['avatar'],
+                        'hours': h
+                    })
+                hours_data.sort(key=lambda x: x['hours'], reverse=True)
+                results.append((appid, name, hours_data))
 
-            results.sort(key=lambda x: x[3], reverse=True)
+            # Sort games by total hours descending
+            results.sort(key=lambda x: sum(u['hours'] for u in x[2]), reverse=True)
 
-            for appid, name, hours_list, _ in results:
+            for appid, name, user_data in results:
                 st.image(f"https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/capsule_616x353.jpg", width=308)
                 st.markdown(f"### {name}")
-                for i, h in enumerate(hours_list):
-                    avatar = profiles[i]["avatar"]
-                    display = profiles[i]["name"]
+                for user in user_data:
                     cols = st.columns([1, 5])
-                    if avatar:
-                        cols[0].image(avatar, width=50)
-                    cols[1].markdown(f"**{display}**: {h} hours")
+                    if user['avatar']:
+                        cols[0].image(user['avatar'], width=50)
+                    cols[1].markdown(f"**{user['name']}**: {user['hours']} hours")
                 st.markdown("---")
 else:
     st.info("Please enter at least 2 users.")
